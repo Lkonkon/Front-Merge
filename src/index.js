@@ -1,25 +1,27 @@
-import Phaser from 'phaser';
-import GameScene from './scenes/GameScene';
+import Phaser from "phaser";
+import MenuScene from "./scenes/MenuScene";
+import GameScene from "./scenes/GameScene";
+import InputScene from "./scenes/InputScene";
 
 const config = {
   type: Phaser.AUTO,
-  parent: 'game',
+  parent: "game",
   width: 390,
   height: 844,
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH
+    autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   physics: {
-    default: 'arcade',
+    default: "arcade",
     arcade: {
       gravity: { y: 0 },
-      debug: false
-    }
+      debug: false,
+    },
   },
-  scene: [GameScene]
+  scene: [MenuScene, GameScene, InputScene],
 };
 
-window.addEventListener('load', () => {
+window.addEventListener("load", () => {
   const game = new Phaser.Game(config);
-}); 
+});

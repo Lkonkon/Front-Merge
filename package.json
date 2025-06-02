@@ -8,6 +8,7 @@
     "build": "webpack --mode production"
   },
   "dependencies": {
+    "merge-towers": "file:",
     "phaser": "^3.70.0"
   },
   "devDependencies": {
