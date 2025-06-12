@@ -2,25 +2,68 @@ import Phaser from "phaser";
 import Bullet from "./Bullet";
 
 class Tower extends Phaser.GameObjects.Sprite {
-  constructor(scene, x, y, laneIndex) {
+  static TOWER_TYPES = {
+    BASIC: {
+      name: "Básica",
+      damage: 10,
+      range: 300,
+      fireRate: 800,
+      cost: 50,
+      color: 0xffffff,
+      bulletSpeed: 400,
+      bulletSize: 1,
+    },
+    RAPID: {
+      name: "Rápida",
+      damage: 5,
+      range: 250,
+      fireRate: 300,
+      cost: 75,
+      color: 0x00ff00,
+      bulletSpeed: 600,
+      bulletSize: 0.8,
+    },
+    SNIPER: {
+      name: "Sniper",
+      damage: 30,
+      range: 500,
+      fireRate: 1500,
+      cost: 100,
+      color: 0xff0000,
+      bulletSpeed: 800,
+      bulletSize: 1.2,
+    },
+  };
+
+  constructor(scene, x, y, laneIndex, type = "BASIC") {
     super(scene, x, y, "tower");
 
     this.scene = scene;
     this.laneIndex = laneIndex;
+    this.type = type;
+    this.towerConfig = Tower.TOWER_TYPES[type];
+
     this.level = 1;
-    this.damage = 10;
-    this.range = 300;
-    this.fireRate = 800;
+    this.damage = this.towerConfig.damage;
+    this.range = this.towerConfig.range;
+    this.fireRate = this.towerConfig.fireRate;
     this.lastFired = 0;
     this.bullets = [];
     this.target = null;
-    this.upgradePrice = 100;
+    this.upgradePrice = Math.floor(this.towerConfig.cost * 1.5);
+    this.isDragging = false;
+    this.lastShotTime = 0;
 
     scene.add.existing(this);
     this.setScale(1);
+    this.setTint(this.towerConfig.color);
+
+    // Adiciona um círculo de alcance (invisível por padrão)
+    this.rangeCircle = scene.add.circle(x, y, this.range, 0xffffff, 0.1);
+    this.rangeCircle.setVisible(false);
 
     this.levelText = scene.add
-      .text(x, y + 20, `Nv ${this.level}`, {
+      .text(x, y + 20, `${this.towerConfig.name} Nv ${this.level}`, {
         color: "#ffffff",
         fontSize: "12px",
       })
@@ -28,6 +71,16 @@ class Tower extends Phaser.GameObjects.Sprite {
 
     this.setInteractive();
     this.on("pointerdown", this.onTowerClick, this);
+    this.on("pointerover", this.showRange, this);
+    this.on("pointerout", this.hideRange, this);
+  }
+
+  showRange() {
+    this.rangeCircle.setVisible(true);
+  }
+
+  hideRange() {
+    this.rangeCircle.setVisible(false);
   }
 
   onTowerClick(pointer) {
@@ -43,7 +96,7 @@ class Tower extends Phaser.GameObjects.Sprite {
     this.level++;
     this.damage = Math.floor(this.damage * 1.5);
     this.fireRate = Math.max(300, this.fireRate * 0.8);
-    this.levelText.setText(`Nv ${this.level}`);
+    this.levelText.setText(`${this.towerConfig.name} Nv ${this.level}`);
 
     this.scene.tweens.add({
       targets: this,
@@ -55,13 +108,20 @@ class Tower extends Phaser.GameObjects.Sprite {
   }
 
   update(time, delta, enemies) {
-    this.levelText.setPosition(this.x, this.y + 20);
+    if (this.isDragging) return;
 
-    let closestEnemy = null;
-    let closestDistance = Infinity;
+    this.lastShotTime += delta;
+    this.rangeCircle.setPosition(this.x, this.y);
 
-    for (const enemy of enemies) {
-      if (enemy.laneIndex === this.laneIndex) {
+    const enemiesInLane = enemies.filter(
+      (enemy) => enemy.laneIndex === this.laneIndex
+    );
+
+    if (enemiesInLane.length > 0) {
+      let closestEnemy = null;
+      let minDistance = Infinity;
+
+      for (const enemy of enemiesInLane) {
         const distance = Phaser.Math.Distance.Between(
           this.x,
           this.y,
@@ -69,17 +129,19 @@ class Tower extends Phaser.GameObjects.Sprite {
           enemy.y
         );
 
-        if (distance < this.range && distance < closestDistance) {
+        if (distance < minDistance && distance <= this.range) {
+          minDistance = distance;
           closestEnemy = enemy;
-          closestDistance = distance;
         }
+      }
+
+      if (closestEnemy && this.lastShotTime >= this.fireRate) {
+        this.fire(closestEnemy);
+        this.lastShotTime = 0;
       }
     }
 
-    if (closestEnemy && time > this.lastFired + this.fireRate) {
-      this.fire(closestEnemy);
-      this.lastFired = time;
-    }
+    this.levelText.setPosition(this.x, this.y + 20);
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const bullet = this.bullets[i];
@@ -91,7 +153,15 @@ class Tower extends Phaser.GameObjects.Sprite {
   }
 
   fire(enemy) {
-    const bullet = new Bullet(this.scene, this.x, this.y, enemy, this.damage);
+    const bullet = new Bullet(
+      this.scene,
+      this.x,
+      this.y,
+      enemy,
+      this.damage,
+      this.towerConfig.bulletSpeed,
+      this.towerConfig.bulletSize
+    );
     this.bullets.push(bullet);
 
     this.scene.tweens.add({
@@ -104,6 +174,7 @@ class Tower extends Phaser.GameObjects.Sprite {
 
   destroy() {
     this.levelText.destroy();
+    this.rangeCircle.destroy();
     super.destroy();
   }
 }

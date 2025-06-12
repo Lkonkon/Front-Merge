@@ -1,19 +1,21 @@
 import Phaser from "phaser";
 
-class Bullet extends Phaser.Physics.Arcade.Sprite {
-  constructor(scene, x, y, target, damage) {
+class Bullet extends Phaser.GameObjects.Sprite {
+  constructor(scene, x, y, target, damage, speed = 400, size = 1) {
     super(scene, x, y, "bullet");
 
     this.scene = scene;
     this.target = target;
     this.damage = damage;
-    this.speed = 400;
+    this.speed = speed;
+    this.size = size;
 
     scene.add.existing(this);
-    scene.physics.add.existing(this);
+    this.setScale(size);
 
-    this.setScale(1.5);
-    this.body.setSize(8, 8);
+    // Adiciona física ao projétil
+    scene.physics.add.existing(this);
+    this.body.setCollideWorldBounds(true);
 
     scene.physics.add.overlap(this, target, this.hitEnemy, null, this);
   }
@@ -24,20 +26,40 @@ class Bullet extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
-    const dx = this.target.x - this.x;
-    const dy = this.target.y - this.y;
-    const angle = Math.atan2(dy, dx);
+    // Calcula a direção para o alvo
+    const angle = Phaser.Math.Angle.Between(
+      this.x,
+      this.y,
+      this.target.x,
+      this.target.y
+    );
 
-    this.body.velocity.x = Math.cos(angle) * this.speed;
-    this.body.velocity.y = Math.sin(angle) * this.speed;
+    // Move o projétil na direção do alvo
+    this.scene.physics.velocityFromRotation(
+      angle,
+      this.speed,
+      this.body.velocity
+    );
 
-    this.setRotation(angle);
+    // Verifica colisão com o alvo
+    const distance = Phaser.Math.Distance.Between(
+      this.x,
+      this.y,
+      this.target.x,
+      this.target.y
+    );
 
+    if (distance < 20) {
+      this.target.takeDamage(this.damage);
+      this.destroy();
+    }
+
+    // Destrói o projétil se sair da tela
     if (
-      this.y < 0 ||
-      this.y > this.scene.cameras.main.height ||
       this.x < 0 ||
-      this.x > this.scene.cameras.main.width
+      this.x > this.scene.cameras.main.width ||
+      this.y < 0 ||
+      this.y > this.scene.cameras.main.height
     ) {
       this.destroy();
     }

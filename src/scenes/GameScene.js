@@ -21,6 +21,7 @@ class GameScene extends Phaser.Scene {
     this.userId = localStorage.getItem("userId");
     this.username = localStorage.getItem("username");
     this.draggedTower = null;
+    this.selectedTowerType = "BASIC";
   }
 
   preload() {
@@ -61,6 +62,7 @@ class GameScene extends Phaser.Scene {
     this.createTowerPositions();
     this.createBarrier();
     this.createUI();
+    this.createTowerSelection();
 
     this.time.addEvent({
       delay: 2000,
@@ -69,7 +71,20 @@ class GameScene extends Phaser.Scene {
       loop: true,
     });
 
-    this.input.on("pointerdown", this.handleTowerPlacement, this);
+    // Separar o evento de clique para criação de torre
+    this.input.on("pointerdown", (pointer) => {
+      // Verifica se clicou em uma torre existente
+      const clickedTower = this.towers.find(
+        (tower) =>
+          Phaser.Math.Distance.Between(pointer.x, pointer.y, tower.x, tower.y) <
+          30
+      );
+
+      if (!clickedTower) {
+        // Se não clicou em uma torre, tenta criar uma nova
+        this.handleTowerPlacement(pointer);
+      }
+    });
 
     // Função para criar uma torre
     this.createTower = (x, y, type) => {
@@ -284,11 +299,184 @@ class GameScene extends Phaser.Scene {
     );
   }
 
+  createTowerSelection() {
+    const towerTypes = Object.entries(Tower.TOWER_TYPES);
+    const buttonWidth = 100;
+    const buttonHeight = 90;
+    const padding = 20;
+    const marginBottom = 12;
+    const barPadding = 16;
+    // Largura total real dos botões
+    const totalWidth =
+      buttonWidth * towerTypes.length + padding * (towerTypes.length - 1);
+    // Posição inicial do fundo
+    const startXBar =
+      (this.cameras.main.width - totalWidth - 2 * barPadding) / 2;
+    const startY = this.cameras.main.height - buttonHeight - marginBottom;
+    // Posição inicial dos botões
+    const startX = startXBar + barPadding;
+
+    // Fundo da barra de seleção
+    const selectionBar = this.add.rectangle(
+      startXBar + (totalWidth + 2 * barPadding) / 2,
+      startY + buttonHeight / 2,
+      totalWidth + 2 * barPadding,
+      buttonHeight + barPadding,
+      0x22232a,
+      0.7
+    );
+    selectionBar.setStrokeStyle(0, 0xffffff, 0);
+
+    towerTypes.forEach(([type, config], index) => {
+      const x = startX + (buttonWidth + padding) * index;
+      const y = startY;
+
+      // Container do botão
+      const container = this.add.container(x, y);
+
+      // Botão de fundo arredondado
+      const button = this.add.rectangle(
+        0,
+        0,
+        buttonWidth,
+        buttonHeight,
+        0x18191f,
+        0.95
+      );
+      button.setStrokeStyle(
+        3,
+        this.selectedTowerType === type ? 0xffff00 : config.color
+      );
+      button.setOrigin(0.5);
+
+      // Ícone da torre
+      const towerIcon = this.add.sprite(0, -22, "tower");
+      towerIcon.setScale(0.6);
+      towerIcon.setTint(config.color);
+
+      // Nome da torre
+      const nameText = this.add
+        .text(0, 8, config.name, {
+          color: "#fff",
+          fontSize: "15px",
+          fontStyle: "bold",
+          fontFamily: "Arial",
+          align: "center",
+          shadow: {
+            offsetX: 1,
+            offsetY: 1,
+            color: "#000",
+            blur: 2,
+            fill: true,
+          },
+        })
+        .setOrigin(0.5);
+
+      // Custo da torre
+      const costText = this.add
+        .text(0, 28, `$${config.cost}`, {
+          color: "#ffe066",
+          fontSize: "13px",
+          fontFamily: "Arial",
+          fontStyle: "bold",
+          align: "center",
+          shadow: {
+            offsetX: 1,
+            offsetY: 1,
+            color: "#000",
+            blur: 2,
+            fill: true,
+          },
+        })
+        .setOrigin(0.5);
+
+      container.add([button, towerIcon, nameText, costText]);
+
+      // Torna o botão interativo
+      button.setInteractive({ useHandCursor: true });
+      button.on("pointerdown", () => {
+        this.selectedTowerType = type;
+        // Destaca o botão selecionado
+        towerTypes.forEach(([t, c], i) => {
+          const btn = this.children.list.find(
+            (child) =>
+              child instanceof Phaser.GameObjects.Container &&
+              child.x === startX + (buttonWidth + padding) * i
+          );
+          if (btn) {
+            const rect = btn.getAt(0);
+            rect.setStrokeStyle(3, t === type ? 0xffff00 : c.color);
+          }
+        });
+      });
+
+      // Tooltip flutuante
+      button.on("pointerover", () => {
+        button.setFillStyle(0x23242b, 1);
+        this.showTowerTooltip(
+          container.x + this.cameras.main.width / 2,
+          container.y,
+          config,
+          container.y
+        );
+      });
+      button.on("pointerout", () => {
+        button.setFillStyle(0x18191f, 0.95);
+        this.hideTowerTooltip();
+      });
+    });
+
+    this.selectedTowerType = "BASIC";
+  }
+
+  showTowerTooltip(x, y, config, buttonY = 0) {
+    this.hideTowerTooltip();
+    const width = 160;
+    const height = 70;
+    // Centraliza acima do botão, com deslocamento para cima
+    x = x - width / 2;
+    y = buttonY - height - 10;
+    // Ajusta para não sair da tela
+    if (x + width > this.cameras.main.width)
+      x = this.cameras.main.width - width - 8;
+    if (x < 0) x = 8;
+    if (y < 0) y = 8;
+
+    this.tooltipElements = [];
+    const bg = this.add
+      .rectangle(x, y, width, height, 0x18191f, 0.97)
+      .setOrigin(0, 0);
+    bg.setStrokeStyle(2, config.color);
+    this.tooltipElements.push(bg);
+    const stats = [
+      `Dano: ${config.damage}`,
+      `Alcance: ${config.range}`,
+      `Tiro: ${config.fireRate}ms`,
+      `Velocidade: ${config.bulletSpeed}`,
+    ];
+    stats.forEach((stat, i) => {
+      const t = this.add.text(x + 12, y + 10 + i * 15, stat, {
+        color: "#fff",
+        fontSize: "12px",
+        fontFamily: "Arial",
+        shadow: { offsetX: 1, offsetY: 1, color: "#000", blur: 2, fill: true },
+      });
+      this.tooltipElements.push(t);
+    });
+  }
+
+  hideTowerTooltip() {
+    if (this.tooltipElements) {
+      this.tooltipElements.forEach((e) => e.destroy());
+      this.tooltipElements = null;
+    }
+  }
+
   handleTowerPlacement(pointer) {
     if (pointer.y > this.cameras.main.height - 100) return;
 
-    const towerCost = 50;
-    if (this.money < towerCost) return;
+    const towerConfig = Tower.TOWER_TYPES[this.selectedTowerType];
+    if (this.money < towerConfig.cost) return;
 
     // Find the closest available tower position
     let closestPosition = null;
@@ -321,7 +509,8 @@ class GameScene extends Phaser.Scene {
       this,
       closestPosition.x,
       closestPosition.y,
-      closestPosition.laneIndex
+      closestPosition.laneIndex,
+      this.selectedTowerType
     );
 
     // Configurar a torre para ser arrastável
@@ -333,6 +522,7 @@ class GameScene extends Phaser.Scene {
       tower.originalX = tower.x;
       tower.originalY = tower.y;
       tower.originalLaneIndex = tower.laneIndex;
+      tower.isDragging = true;
     });
 
     tower.on("drag", (pointer, dragX, dragY) => {
@@ -344,18 +534,12 @@ class GameScene extends Phaser.Scene {
       // Encontrar a posição mais próxima disponível
       let newPosition = null;
       let minDistance = Infinity;
+      let targetTower = null;
 
       for (const position of this.towerPositions) {
         // Ignora a posição atual da torre
         if (position.x === tower.originalX && position.y === tower.originalY)
           continue;
-
-        // Verifica se a posição está ocupada por outra torre
-        const isOccupied = this.towers.some(
-          (t) => t !== tower && t.x === position.x && t.y === position.y
-        );
-
-        if (isOccupied) continue;
 
         const distance = Phaser.Math.Distance.Between(
           tower.x,
@@ -367,23 +551,59 @@ class GameScene extends Phaser.Scene {
         if (distance < minDistance && distance < 50) {
           minDistance = distance;
           newPosition = position;
+
+          // Verifica se há uma torre na posição
+          const towerAtPosition = this.towers.find(
+            (t) => t !== tower && t.x === position.x && t.y === position.y
+          );
+
+          if (towerAtPosition) {
+            targetTower = towerAtPosition;
+          }
         }
       }
 
       if (newPosition) {
-        // Atualizar a posição e lane da torre
-        tower.x = newPosition.x;
-        tower.y = newPosition.y;
-        tower.laneIndex = newPosition.laneIndex;
+        if (
+          targetTower &&
+          targetTower.type === tower.type &&
+          targetTower.level === tower.level
+        ) {
+          // Merge das torres do mesmo tipo e nível
+          targetTower.upgrade();
 
-        // Atualizar a posição do texto de nível
-        tower.levelText.setPosition(tower.x, tower.y + 20);
+          // Remover a torre que foi arrastada
+          const index = this.towers.indexOf(tower);
+          if (index !== -1) {
+            this.towers.splice(index, 1);
+          }
+          tower.destroy();
 
-        // Atualizar no servidor apenas se estiver autenticado
-        const gameId = localStorage.getItem("currentGameId");
-        const token = localStorage.getItem("token");
-        if (gameId && token) {
-          this.updateTowerPosition(tower);
+          // Atualizar no servidor apenas se estiver autenticado
+          const gameId = localStorage.getItem("currentGameId");
+          const token = localStorage.getItem("token");
+          if (gameId && token) {
+            this.updateTowerPosition(targetTower);
+          }
+        } else if (!targetTower) {
+          // Mover para posição vazia
+          tower.x = newPosition.x;
+          tower.y = newPosition.y;
+          tower.laneIndex = newPosition.laneIndex;
+          tower.levelText.setPosition(tower.x, tower.y + 20);
+
+          // Atualizar no servidor apenas se estiver autenticado
+          const gameId = localStorage.getItem("currentGameId");
+          const token = localStorage.getItem("token");
+          if (gameId && token) {
+            this.updateTowerPosition(tower);
+          }
+        } else {
+          // Se a torre de destino tem tipo ou nível diferente, volta para posição original
+          tower.x = tower.originalX;
+          tower.y = tower.originalY;
+          tower.laneIndex = tower.originalLaneIndex;
+          tower.levelText.setPosition(tower.x, tower.y + 20);
         }
       } else {
         // Se não encontrou uma nova posição válida, volta para a posição original
@@ -392,11 +612,13 @@ class GameScene extends Phaser.Scene {
         tower.laneIndex = tower.originalLaneIndex;
         tower.levelText.setPosition(tower.x, tower.y + 20);
       }
+
+      tower.isDragging = false;
     });
 
     this.towers.push(tower);
 
-    this.money -= towerCost;
+    this.money -= towerConfig.cost;
     this.updateUI();
   }
 
