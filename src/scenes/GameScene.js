@@ -20,6 +20,7 @@ class GameScene extends Phaser.Scene {
     this.availablePositions = [];
     this.userId = localStorage.getItem("userId");
     this.username = localStorage.getItem("username");
+    this.draggedTower = null;
   }
 
   preload() {
@@ -69,6 +70,116 @@ class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointerdown", this.handleTowerPlacement, this);
+
+    // Função para criar uma torre
+    this.createTower = (x, y, type) => {
+      const tower = this.add.sprite(x, y, "tower");
+      tower.setInteractive({ draggable: true }); // Torna a torre arrastável
+      tower.type = type;
+      tower.id = Date.now(); // ID temporário até receber do servidor
+
+      // Eventos de drag
+      this.input.setDraggable(tower);
+
+      tower.on("dragstart", (pointer) => {
+        tower.originalX = tower.x;
+        tower.originalY = tower.y;
+      });
+
+      tower.on("drag", (pointer, dragX, dragY) => {
+        tower.x = dragX;
+        tower.y = dragY;
+      });
+
+      tower.on("dragend", async (pointer) => {
+        try {
+          const gameId = localStorage.getItem("currentGameId");
+          const response = await fetch(
+            `http://localhost:3000/api/games/${gameId}/towers/${tower.id}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+              },
+              body: JSON.stringify({
+                x: tower.x,
+                y: tower.y,
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            // Se houver erro, volta para a posição original
+            tower.x = tower.originalX;
+            tower.y = tower.originalY;
+            throw new Error("Erro ao realocar torre");
+          }
+
+          const updatedTower = await response.json();
+          tower.id = updatedTower.id; // Atualiza o ID se for uma nova torre
+        } catch (error) {
+          console.error("Erro ao realocar torre:", error);
+          // Mostra mensagem de erro para o jogador
+          this.showError("Erro ao realocar torre");
+        }
+      });
+
+      return tower;
+    };
+
+    // Função para mostrar erro
+    this.showError = (message) => {
+      const errorText = this.add
+        .text(
+          this.cameras.main.width / 2,
+          this.cameras.main.height / 2,
+          message,
+          {
+            fontSize: "24px",
+            fill: "#ff0000",
+            backgroundColor: "#000000",
+            padding: { x: 10, y: 5 },
+          }
+        )
+        .setOrigin(0.5);
+
+      this.time.delayedCall(2000, () => {
+        errorText.destroy();
+      });
+    };
+
+    // Função para carregar torres do servidor
+    this.loadTowers = async () => {
+      try {
+        const gameId = localStorage.getItem("currentGameId");
+        const response = await fetch(
+          `http://localhost:3000/api/games/${gameId}/towers`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Erro ao carregar torres");
+        }
+
+        const towers = await response.json();
+        towers.forEach((towerData) => {
+          const tower = this.createTower(
+            towerData.x,
+            towerData.y,
+            towerData.type
+          );
+          tower.id = towerData.id; // Atualiza o ID com o valor do servidor
+        });
+      } catch (error) {
+        console.error("Erro ao carregar torres:", error);
+        this.showError("Erro ao carregar torres");
+      }
+    };
   }
 
   createLanes() {
@@ -184,7 +295,12 @@ class GameScene extends Phaser.Scene {
     let minDistance = Infinity;
 
     for (const position of this.towerPositions) {
-      if (position.occupied) continue;
+      // Verifica se a posição está ocupada por alguma torre
+      const isOccupied = this.towers.some(
+        (tower) => tower.x === position.x && tower.y === position.y
+      );
+
+      if (isOccupied) continue;
 
       const distance = Phaser.Math.Distance.Between(
         pointer.x,
@@ -207,13 +323,131 @@ class GameScene extends Phaser.Scene {
       closestPosition.y,
       closestPosition.laneIndex
     );
-    this.towers.push(tower);
 
-    closestPosition.occupied = true;
-    closestPosition.spot.setAlpha(0.2);
+    // Configurar a torre para ser arrastável
+    tower.setInteractive({ draggable: true });
+    this.input.setDraggable(tower);
+
+    // Eventos de drag
+    tower.on("dragstart", (pointer) => {
+      tower.originalX = tower.x;
+      tower.originalY = tower.y;
+      tower.originalLaneIndex = tower.laneIndex;
+    });
+
+    tower.on("drag", (pointer, dragX, dragY) => {
+      tower.x = dragX;
+      tower.y = dragY;
+    });
+
+    tower.on("dragend", (pointer) => {
+      // Encontrar a posição mais próxima disponível
+      let newPosition = null;
+      let minDistance = Infinity;
+
+      for (const position of this.towerPositions) {
+        // Ignora a posição atual da torre
+        if (position.x === tower.originalX && position.y === tower.originalY)
+          continue;
+
+        // Verifica se a posição está ocupada por outra torre
+        const isOccupied = this.towers.some(
+          (t) => t !== tower && t.x === position.x && t.y === position.y
+        );
+
+        if (isOccupied) continue;
+
+        const distance = Phaser.Math.Distance.Between(
+          tower.x,
+          tower.y,
+          position.x,
+          position.y
+        );
+
+        if (distance < minDistance && distance < 50) {
+          minDistance = distance;
+          newPosition = position;
+        }
+      }
+
+      if (newPosition) {
+        // Atualizar a posição e lane da torre
+        tower.x = newPosition.x;
+        tower.y = newPosition.y;
+        tower.laneIndex = newPosition.laneIndex;
+
+        // Atualizar a posição do texto de nível
+        tower.levelText.setPosition(tower.x, tower.y + 20);
+
+        // Atualizar no servidor apenas se estiver autenticado
+        const gameId = localStorage.getItem("currentGameId");
+        const token = localStorage.getItem("token");
+        if (gameId && token) {
+          this.updateTowerPosition(tower);
+        }
+      } else {
+        // Se não encontrou uma nova posição válida, volta para a posição original
+        tower.x = tower.originalX;
+        tower.y = tower.originalY;
+        tower.laneIndex = tower.originalLaneIndex;
+        tower.levelText.setPosition(tower.x, tower.y + 20);
+      }
+    });
+
+    this.towers.push(tower);
 
     this.money -= towerCost;
     this.updateUI();
+  }
+
+  // Atualizar o método updateTowerPosition para ser mais robusto
+  async updateTowerPosition(tower) {
+    try {
+      const gameId = localStorage.getItem("currentGameId");
+      const token = localStorage.getItem("token");
+
+      if (!gameId || !token) {
+        console.log("Usuário não autenticado ou sem gameId");
+        return;
+      }
+
+      const response = await fetch(
+        `http://localhost:3000/api/games/${gameId}/towers/${tower.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            x: tower.x,
+            y: tower.y,
+            laneIndex: tower.laneIndex,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Erro ao atualizar posição da torre");
+      }
+
+      const updatedTower = await response.json();
+      tower.id = updatedTower.id;
+    } catch (error) {
+      console.error("Erro ao atualizar posição da torre:", error);
+      // Não mostra erro para o usuário durante o desenvolvimento
+      // this.showError("Erro ao atualizar posição da torre");
+    }
+  }
+
+  // Adicionar método para verificar se uma posição está ocupada
+  isPositionOccupied(position) {
+    return this.towers.some(
+      (tower) =>
+        tower.x === position.x &&
+        tower.y === position.y &&
+        tower !== this.draggedTower
+    );
   }
 
   updateTowers(time, delta) {
@@ -316,6 +550,11 @@ class GameScene extends Phaser.Scene {
     });
 
     this.scene.pause();
+  }
+
+  update(time, delta) {
+    this.updateTowers(time, delta);
+    this.updateEnemies(time, delta);
   }
 }
 
