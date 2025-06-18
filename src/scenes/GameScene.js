@@ -27,6 +27,8 @@ class GameScene extends Phaser.Scene {
     this.gameId = localStorage.getItem("currentGameId");
     this.lastDifficultyIncrease = 0;
     this.difficultyInterval = 60000;
+    this.isGameOver = false;
+    this.spawnEvent = null;
   }
 
   preload() {
@@ -53,6 +55,7 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
+    this.username = localStorage.getItem("username");
     this.socket = io("http://localhost:3000", {
       transports: ["polling"],
       reconnection: true,
@@ -114,7 +117,8 @@ class GameScene extends Phaser.Scene {
     this.createUI();
     this.createTowerSelection();
 
-    this.time.addEvent({
+    this.isGameOver = false;
+    this.spawnEvent = this.time.addEvent({
       delay: 2000,
       callback: this.spawnEnemy,
       callbackScope: this,
@@ -350,17 +354,20 @@ class GameScene extends Phaser.Scene {
   }
 
   updateUI() {
-    this.scoreText.setText(`Pontos: ${this.score}`);
-    this.moneyText.setText(`Moedas: ${this.money}`);
-    this.healthText.setText(`Barreira: ${this.barrierHealth}%`);
-    this.difficultyText.setText(
-      `Dificuldade: ${this.enemyHealthMultiplier.toFixed(1)}x`
-    );
-    this.timeText.setText(
-      `Tempo: ${Math.floor(this.gameTime / 60)}:${(this.gameTime % 60)
-        .toString()
-        .padStart(2, "0")}`
-    );
+    if (this.scoreText) this.scoreText.setText(`Pontos: ${this.score}`);
+    if (this.moneyText) this.moneyText.setText(`Moedas: ${this.money}`);
+    if (this.healthText)
+      this.healthText.setText(`Barreira: ${this.barrierHealth}%`);
+    if (this.difficultyText)
+      this.difficultyText.setText(
+        `Dificuldade: ${this.enemyHealthMultiplier.toFixed(1)}x`
+      );
+    if (this.timeText)
+      this.timeText.setText(
+        `Tempo: ${Math.floor(this.gameTime / 60)}:${(this.gameTime % 60)
+          .toString()
+          .padStart(2, "0")}`
+      );
   }
 
   spawnEnemy() {
@@ -788,8 +795,8 @@ class GameScene extends Phaser.Scene {
   updateEnemies(time, delta) {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
+      if (!enemy.scene || enemy.scene !== this) continue;
       enemy.update();
-
       if (enemy.isDead()) {
         this.score += 10;
         this.money += 15;
@@ -816,23 +823,32 @@ class GameScene extends Phaser.Scene {
   }
 
   async gameOver() {
+    // Parar spawn de monstros
+    if (this.spawnEvent) {
+      this.spawnEvent.remove(false);
+    }
+    this.isGameOver = true;
+    // Remover listeners do socket
+    if (this.socket) {
+      this.socket.removeAllListeners();
+    }
+    // Destruir todos os inimigos restantes
+    for (const enemy of this.enemies) {
+      if (enemy && enemy.destroy) enemy.destroy();
+    }
+    this.enemies = [];
     // Submit score to the server
     try {
-      const response = await fetch("http://localhost:3000/api/scores", {
+      await fetch("http://localhost:3000/api/scores", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userId: this.userId,
-          score: this.score,
           username: this.username,
+          score: this.score,
         }),
       });
-
-      if (!response.ok) {
-        console.error("Failed to submit score");
-      }
     } catch (error) {
       console.error("Error submitting score:", error);
     }
@@ -875,28 +891,12 @@ class GameScene extends Phaser.Scene {
 
     restartButton.setInteractive();
     restartButton.on("pointerdown", () => {
-      // Disconnect socket before restarting
-      if (this.socket) {
-        this.socket.disconnect();
-      }
-
-      // Reset game state
-      this.scene.restart();
-
-      // Reset game variables
-      this.score = 0;
-      this.money = 100;
-      this.barrierHealth = 100;
-      this.gameTime = 0;
-      this.enemyHealthMultiplier = 1;
-      this.enemies = [];
-      this.towers = [];
+      this.scene.start("MenuScene");
     });
-
-    this.scene.pause();
   }
 
   update(time, delta) {
+    if (this.isGameOver) return;
     this.updateTowers(time, delta);
     this.updateEnemies(time, delta);
 

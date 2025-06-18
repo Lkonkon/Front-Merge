@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import MenuScene from "./scenes/MenuScene";
 import GameScene from "./scenes/GameScene";
 import InputScene from "./scenes/InputScene";
+import RankingScene from "./scenes/RankingScene";
 
 const config = {
   type: Phaser.AUTO,
@@ -19,7 +20,7 @@ const config = {
       debug: false,
     },
   },
-  scene: [MenuScene, GameScene, InputScene],
+  scene: [MenuScene, GameScene, InputScene, RankingScene],
 };
 
 window.addEventListener("load", () => {

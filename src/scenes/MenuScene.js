@@ -52,9 +52,26 @@ class MenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Botão Ranking
+    const rankingButton = this.add.rectangle(
+      width / 2,
+      height * 0.8,
+      200,
+      50,
+      0x007bff,
+      0.5
+    );
+    const rankingText = this.add
+      .text(width / 2, height * 0.8, "Ranking", {
+        fontSize: "24px",
+        fill: "#fff",
+      })
+      .setOrigin(0.5);
+
     // Make elements interactive
     inputBox.setInteractive();
     playButton.setInteractive();
+    rankingButton.setInteractive();
 
     // Input handling
     inputBox.on("pointerdown", () => {
@@ -97,6 +114,11 @@ class MenuScene extends Phaser.Scene {
         console.error("Full error:", error); // More detailed error logging
         this.showError("Erro de conexão com o servidor");
       }
+    });
+
+    // Ranking button handling
+    rankingButton.on("pointerdown", () => {
+      this.scene.start("RankingScene");
     });
   }
 
