@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import Tower from "../entities/Tower";
 import Enemy from "../entities/Enemy";
+import io from "socket.io-client";
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -22,6 +23,10 @@ class GameScene extends Phaser.Scene {
     this.username = localStorage.getItem("username");
     this.draggedTower = null;
     this.selectedTowerType = "BASIC";
+    this.socket = null;
+    this.gameId = localStorage.getItem("currentGameId");
+    this.lastDifficultyIncrease = 0;
+    this.difficultyInterval = 60000;
   }
 
   preload() {
@@ -48,6 +53,51 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
+    this.socket = io("http://localhost:3000", {
+      transports: ["polling"],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 45000,
+      path: "/socket.io/",
+    });
+
+    this.socket.on("connect", () => {
+      console.log("Connected to server");
+      this.socket.emit("join-game", this.gameId);
+    });
+
+    this.socket.on("connect_error", (error) => {
+      console.error("Connection error:", error);
+    });
+
+    this.socket.on("disconnect", (reason) => {
+      console.log("Disconnected:", reason);
+    });
+
+    this.socket.on("game-state", (state) => {
+      this.gameState = state;
+      this.gameTime = state.gameTime;
+      this.enemyHealthMultiplier = state.difficultyMultiplier;
+      this.updateUI();
+    });
+
+    this.socket.on("difficulty-increase", (multiplier) => {
+      this.enemyHealthMultiplier = multiplier;
+      console.log("Difficulty increased to:", multiplier);
+      this.updateUI();
+    });
+
+    this.socket.on("game-time-update", ({ gameTime, difficultyMultiplier }) => {
+      this.gameTime = gameTime;
+      this.enemyHealthMultiplier = difficultyMultiplier;
+      this.updateUI();
+    });
+
+    setInterval(() => {
+      this.socket.emit("debug-time", this.gameId);
+    }, 5000);
+
     this.background = this.add.image(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
@@ -195,6 +245,23 @@ class GameScene extends Phaser.Scene {
         this.showError("Erro ao carregar torres");
       }
     };
+
+    // Inicializar o multiplicador de dificuldade
+    this.enemyHealthMultiplier = 1;
+
+    // Adicionar texto para mostrar a dificuldade atual
+    this.difficultyText = this.add.text(
+      10,
+      100,
+      `Dificuldade: ${this.enemyHealthMultiplier.toFixed(1)}x`,
+      {
+        color: "#ffffff",
+        fontSize: "18px",
+        fontWeight: "bold",
+        stroke: "#000000",
+        strokeThickness: 3,
+      }
+    );
   }
 
   createLanes() {
@@ -272,12 +339,28 @@ class GameScene extends Phaser.Scene {
       `Barreira: ${this.barrierHealth}%`,
       textStyle
     );
+    this.timeText = this.add.text(
+      10,
+      100,
+      `Tempo: ${Math.floor(this.gameTime / 60)}:${(this.gameTime % 60)
+        .toString()
+        .padStart(2, "0")}`,
+      textStyle
+    );
   }
 
   updateUI() {
     this.scoreText.setText(`Pontos: ${this.score}`);
     this.moneyText.setText(`Moedas: ${this.money}`);
     this.healthText.setText(`Barreira: ${this.barrierHealth}%`);
+    this.difficultyText.setText(
+      `Dificuldade: ${this.enemyHealthMultiplier.toFixed(1)}x`
+    );
+    this.timeText.setText(
+      `Tempo: ${Math.floor(this.gameTime / 60)}:${(this.gameTime % 60)
+        .toString()
+        .padStart(2, "0")}`
+    );
   }
 
   spawnEnemy() {
@@ -287,8 +370,27 @@ class GameScene extends Phaser.Scene {
     const baseHealth = 30;
     const scaledHealth = Math.floor(baseHealth * this.enemyHealthMultiplier);
 
+    console.log(
+      `Spawning enemy with health: ${scaledHealth} (${this.enemyHealthMultiplier.toFixed(
+        1
+      )}x) at time ${this.gameTime}s`
+    );
+
     const enemy = new Enemy(this, x, 0, laneIndex, scaledHealth);
     this.enemies.push(enemy);
+
+    // Emit enemy spawn to server
+    this.socket.emit("spawn-enemy", {
+      gameId: this.gameId,
+      enemy: {
+        id: enemy.id,
+        x: enemy.x,
+        y: enemy.y,
+        laneIndex: enemy.laneIndex,
+        health: enemy.health,
+        maxHealth: enemy.maxHealth,
+      },
+    });
 
     this.physics.add.collider(
       enemy,
@@ -314,7 +416,7 @@ class GameScene extends Phaser.Scene {
       (this.cameras.main.width - totalWidth - 2 * barPadding) / 2;
     const startY = this.cameras.main.height - buttonHeight - marginBottom;
     // Posição inicial dos botões
-    const startX = startXBar + barPadding;
+    const startX = startXBar;
 
     // Fundo da barra de seleção
     const selectionBar = this.add.rectangle(
@@ -328,8 +430,8 @@ class GameScene extends Phaser.Scene {
     selectionBar.setStrokeStyle(0, 0xffffff, 0);
 
     towerTypes.forEach(([type, config], index) => {
-      const x = startX + (buttonWidth + padding) * index;
-      const y = startY;
+      const x = (buttonWidth + padding) * index + 75;
+      const y = startY + 45;
 
       // Container do botão
       const container = this.add.container(x, y);
@@ -485,7 +587,9 @@ class GameScene extends Phaser.Scene {
     for (const position of this.towerPositions) {
       // Verifica se a posição está ocupada por alguma torre
       const isOccupied = this.towers.some(
-        (tower) => tower.x === position.x && tower.y === position.y
+        (tower) =>
+          Math.abs(tower.x - position.x) < 1 &&
+          Math.abs(tower.y - position.y) < 1
       );
 
       if (isOccupied) continue;
@@ -503,7 +607,10 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (!closestPosition) return;
+    if (!closestPosition) {
+      this.showError("Posição ocupada!");
+      return;
+    }
 
     const tower = new Tower(
       this,
@@ -768,7 +875,22 @@ class GameScene extends Phaser.Scene {
 
     restartButton.setInteractive();
     restartButton.on("pointerdown", () => {
-      this.scene.start("GameScene");
+      // Disconnect socket before restarting
+      if (this.socket) {
+        this.socket.disconnect();
+      }
+
+      // Reset game state
+      this.scene.restart();
+
+      // Reset game variables
+      this.score = 0;
+      this.money = 100;
+      this.barrierHealth = 100;
+      this.gameTime = 0;
+      this.enemyHealthMultiplier = 1;
+      this.enemies = [];
+      this.towers = [];
     });
 
     this.scene.pause();
@@ -777,6 +899,13 @@ class GameScene extends Phaser.Scene {
   update(time, delta) {
     this.updateTowers(time, delta);
     this.updateEnemies(time, delta);
+
+    // Update all bullets
+    for (const tower of this.towers) {
+      for (const bullet of tower.bullets) {
+        bullet.update();
+      }
+    }
   }
 }
 

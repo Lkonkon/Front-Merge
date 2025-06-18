@@ -55,22 +55,34 @@ class Tower extends Phaser.GameObjects.Sprite {
     this.lastShotTime = 0;
 
     scene.add.existing(this);
-    this.setScale(1);
+    scene.physics.add.existing(this);
+    this.setScale(0.6);
     this.setTint(this.towerConfig.color);
 
-    // Adiciona um círculo de alcance (invisível por padrão)
     this.rangeCircle = scene.add.circle(x, y, this.range, 0xffffff, 0.1);
     this.rangeCircle.setVisible(false);
 
     this.levelText = scene.add
-      .text(x, y + 20, `${this.towerConfig.name} Nv ${this.level}`, {
-        color: "#ffffff",
-        fontSize: "12px",
+      .text(x, y + 20, `Lvl ${this.level}`, {
+        color: "#000000",
+        fontSize: "16px",
+        fontStyle: "bold",
+        stroke: "#ffffff",
+        strokeThickness: 3,
+        shadow: {
+          offsetX: 1,
+          offsetY: 1,
+          color: "#000000",
+          blur: 2,
+          fill: true,
+        },
       })
       .setOrigin(0.5);
 
+    this.body.setImmovable(true);
+    this.body.setSize(40, 40);
+
     this.setInteractive();
-    this.on("pointerdown", this.onTowerClick, this);
     this.on("pointerover", this.showRange, this);
     this.on("pointerout", this.hideRange, this);
   }
@@ -83,20 +95,11 @@ class Tower extends Phaser.GameObjects.Sprite {
     this.rangeCircle.setVisible(false);
   }
 
-  onTowerClick(pointer) {
-    if (this.scene.money >= this.upgradePrice) {
-      this.upgrade();
-      this.scene.money -= this.upgradePrice;
-      this.upgradePrice = Math.floor(this.upgradePrice * 1.5);
-      this.scene.updateUI();
-    }
-  }
-
   upgrade() {
     this.level++;
     this.damage = Math.floor(this.damage * 1.5);
     this.fireRate = Math.max(300, this.fireRate * 0.8);
-    this.levelText.setText(`${this.towerConfig.name} Nv ${this.level}`);
+    this.levelText.setText(`Lvl ${this.level}`);
 
     this.scene.tweens.add({
       targets: this,

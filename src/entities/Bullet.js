@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
 class Bullet extends Phaser.GameObjects.Sprite {
-  constructor(scene, x, y, target, damage, speed = 400, size = 1) {
+  constructor(scene, x, y, target, damage, speed, size = 1) {
     super(scene, x, y, "bullet");
 
     this.scene = scene;
@@ -11,70 +11,50 @@ class Bullet extends Phaser.GameObjects.Sprite {
     this.size = size;
 
     scene.add.existing(this);
-    this.setScale(size);
-
-    // Adiciona física ao projétil
     scene.physics.add.existing(this);
-    this.body.setCollideWorldBounds(true);
 
-    scene.physics.add.overlap(this, target, this.hitEnemy, null, this);
+    this.setScale(0.3 * size);
+    this.setTint(0xffff00);
+
+    this.body.setImmovable(true);
+    this.body.setSize(10, 10);
+
+    this.active = true;
+    this.velocity = new Phaser.Math.Vector2();
   }
 
   update() {
-    if (!this.target || !this.target.active) {
+    if (!this.active || !this.target || !this.target.active) {
       this.destroy();
       return;
     }
 
-    // Calcula a direção para o alvo
-    const angle = Phaser.Math.Angle.Between(
-      this.x,
-      this.y,
-      this.target.x,
-      this.target.y
-    );
+    // Calculate direction to target
+    const dx = this.target.x - this.x;
+    const dy = this.target.y - this.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
 
-    // Move o projétil na direção do alvo
-    this.scene.physics.velocityFromRotation(
-      angle,
-      this.speed,
-      this.body.velocity
-    );
-
-    // Verifica colisão com o alvo
-    const distance = Phaser.Math.Distance.Between(
-      this.x,
-      this.y,
-      this.target.x,
-      this.target.y
-    );
-
-    if (distance < 20) {
+    if (distance < 10) {
       this.target.takeDamage(this.damage);
       this.destroy();
+      return;
     }
 
-    // Destrói o projétil se sair da tela
-    if (
-      this.x < 0 ||
-      this.x > this.scene.cameras.main.width ||
-      this.y < 0 ||
-      this.y > this.scene.cameras.main.height
-    ) {
-      this.destroy();
-    }
+    // Normalize direction and apply speed
+    this.velocity.x = (dx / distance) * this.speed;
+    this.velocity.y = (dy / distance) * this.speed;
+
+    // Update position
+    this.x += this.velocity.x * 0.016; // 0.016 is roughly 1/60 for 60fps
+    this.y += this.velocity.y * 0.016;
+
+    // Update rotation to face target
+    this.rotation = Math.atan2(dy, dx) + Math.PI / 2;
   }
 
-  hitEnemy(bullet, enemy) {
-    if (enemy && enemy.active) {
-      enemy.takeDamage(this.damage);
-    }
-    this.destroy();
-  }
-
-  preUpdate(time, delta) {
-    super.preUpdate(time, delta);
-    this.update();
+  destroy() {
+    this.active = false;
+    super.destroy();
   }
 }
 
